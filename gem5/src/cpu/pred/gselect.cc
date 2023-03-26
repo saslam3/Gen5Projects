@@ -1,81 +1,102 @@
-#include "cpu/pred/gselect_pred.hh"
+#include "cpu/pred/gselect.hh"
 
 #include "base/bitfield.hh"
 #include "base/intmath.hh"
 
-GSelectBP::GSelectBP(const LocalBPParams &params)
+GSelectBP::GSelectBP(const GSelectBPParams &params)
     : BPredUnit(params),
-      PredictorSize(params.localPredictorSize),
-      PHTCtrBits(params.localCtrBits),
-      globalHistoryBits(params.globalHistoryBits),
-      localCtrs(params.localPredictorSize),
-      indexMask(PredictorSize - 1),
-      ghr(0)
+      globalHistoryReg(params.numThreads, 0),
+      globalHistoryBits(ceilLog2(params.globalPredictorSize)),
+      globalPredictorSize(params.globalPredictorSize),
+      globalCtrBits(params.globalCtrBits),
+      counters(globalPredictorSize, SatCounter8(globalCtrBits))
 {
-    for (auto &ctr : localCtrs)
-        ctr.setBits(PHTCtrBits);
-}
+    if (!isPowerOf2(globalPredictorSize))
+        fatal("Invalid global history predictor size.\n");
 
-inline bool
-GSelectBP::getPrediction(uint8_t &count)
-{
-    return count >= (1 << (PHTCtrBits - 1));
-}
+    historyRegisterMask = mask(globalHistoryBits);
+    globalHistoryMask = globalPredictorSize - 1;
 
-inline unsigned
-GSelectBP::getGSelectIndex(Addr &PC)
-{
-    unsigned pcIndex = PC >> instShiftAmt;
-    unsigned ghrIndex = ghr & ((1 << globalHistoryBits) - 1);
-    return (pcIndex ^ ghrIndex) & indexMask;
+    threshold = (ULL(1) << (globalCtrBits - 1)) - 1;
 }
 
 void
-GSelectBP::uncondBranch(ThreadID tid, Addr pc, void *&bp_history)
+GSelectBP::uncondBranch(ThreadID tid, Addr pc, void * &bpHistory)
 {
-    bp_history = nullptr;
+    BPHistory *history = new BPHistory;
+    history->globalHistoryReg = globalHistoryReg[tid];
+    history->finalPred = true;
+    bpHistory = static_cast<void*>(history);
+    updateGlobalHistReg(tid, true);
+}
+
+void
+GSelectBP::squash(ThreadID tid, void *bpHistory)
+{
+    BPHistory *history = static_cast<BPHistory*>(bpHistory);
+    globalHistoryReg[tid] = history->globalHistoryReg;
+
+    delete history;
 }
 
 bool
-GSelectBP::lookup(ThreadID tid, Addr branch_addr, void *&bp_history)
+GSelectBP::lookup(ThreadID tid, Addr branchAddr, void * &bpHistory)
 {
-    unsigned index = getGSelectIndex(branch_addr);
-    SatCounter8 &ctr = localCtrs[index];
-    bool taken = getPrediction(ctr);
+    unsigned globalHistoryIdx = (((branchAddr >> instShiftAmt)
+                                ^ (globalHistoryReg[tid] << globalHistoryBits))
+                                & globalHistoryMask);
 
-    bp_history = nullptr;
-    return taken;
+    assert(globalHistoryIdx < globalPredictorSize);
+
+    bool finalPrediction = counters[globalHistoryIdx] > threshold;
+
+    BPHistory *history = new BPHistory;
+    history->globalHistoryReg = globalHistoryReg[tid];
+    history->finalPred = finalPrediction;
+    bpHistory = static_cast<void*>(history);
+    updateGlobalHistReg(tid, finalPrediction);
+
+    return finalPrediction;
 }
 
 void
-GSelectBP::btbUpdate(ThreadID tid, Addr branch_addr, void *&bp_history)
+GSelectBP::btbUpdate(ThreadID tid, Addr branchAddr, void * &bpHistory)
 {
-    unsigned index = getGSelectIndex(branch_addr);
-    SatCounter8 &ctr = localCtrs[index];
-    ctr.reset();
-
-    bp_history = nullptr;
+    globalHistoryReg[tid] &= (historyRegisterMask & ~ULL(1));
 }
 
 void
-GSelectBP::update(ThreadID tid, Addr branch_addr, bool taken, void *bp_history,
-                  bool squashed, const StaticInstPtr &inst, Addr corrTarget)
+GSelectBP::update(ThreadID tid, Addr branchAddr, bool taken, void *bpHistory,
+                 bool squashed, const StaticInstPtr & inst, Addr corrTarget)
 {
-    unsigned index = getGSelectIndex(branch_addr);
-    SatCounter8 &ctr = localCtrs[index];
+    assert(bpHistory);
 
-    if (taken) {
-        ctr.increment();
-    } else {
-        ctr.decrement();
+    BPHistory *history = static_cast<BPHistory*>(bpHistory);
+
+    if (squashed) {
+        globalHistoryReg[tid] = (history->globalHistoryReg << 1) | taken;
+        return;
     }
 
-    // Update the global history register
-    ghr = (ghr << 1) | (taken ? 1 : 0);
+    unsigned globalHistoryIdx = (((branchAddr >> instShiftAmt)
+                                ^ (history->globalHistoryReg << globalHistoryBits))
+                                & globalHistoryMask);
+
+    assert(globalHistoryIdx < globalPredictorSize);
+
+    if (taken) {
+        counters[globalHistoryIdx]++;
+    } else {
+        counters[globalHistoryIdx]--;
+    }
+
+    delete history;
 }
 
 void
-GSelectBP::squash(ThreadID tid, void *bp_history)
+GSelectBP::updateGlobalHistReg(ThreadID tid, bool taken)
 {
-    // No state to restore or actions to perform
+    globalHistoryReg[tid] = taken ? (globalHistoryReg[tid] << 1) | 1 :
+                               (globalHistoryReg[tid] << 1);
+    globalHistoryReg[tid] &= historyRegisterMask;
 }
