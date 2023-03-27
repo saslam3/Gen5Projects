@@ -6,9 +6,9 @@
 GSelectBP::GSelectBP(const GSelectBPParams &params)
     : BPredUnit(params),
       globalHistoryReg(params.numThreads, 0),
-      globalHistoryBits(ceilLog2(params.globalPredictorSize)),
-      globalPredictorSize(params.globalPredictorSize),
-      globalCtrBits(params.globalCtrBits),
+      globalHistoryBits(ceilLog2(params.PredictorSize)),
+      globalPredictorSize(params.PredictorSize),
+      globalCtrBits(params.PHTCtrBits),
       counters(globalPredictorSize, SatCounter8(globalCtrBits))
 {
     if (!isPowerOf2(globalPredictorSize))
