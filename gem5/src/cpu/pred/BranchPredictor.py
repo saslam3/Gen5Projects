@@ -754,6 +754,6 @@ class GSelectBP(BranchPredictor):
     type = 'GSelectBP'
     cxx_class = 'GSelectBP'
     cxx_header = "cpu/pred/gselect.hh"
-    PredictorSize = Param.Unsigned(1024, "Size of predictor (entries).")
+    PredictorSize = Param.Unsigned(4096, "Size of predictor (entries).")
     PHTCtrBits = Param.Unsigned(2, "Bits per counter.")
     globalHistoryBits = Param.Unsigned(8, "Bits of the global history.")
