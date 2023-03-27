@@ -27,13 +27,14 @@ diff -ruN gem5_clean/src/cpu/pred/SConscript gem5/src/cpu/pred/SConscript
 \ No newline at end of file
 diff -ruN gem5_clean/src/cpu/pred/gselect.cc gem5/src/cpu/pred/gselect.cc
 --- gem5_clean/src/cpu/pred/gselect.cc	1970-01-01 00:00:00.000000000 +0000
-+++ gem5/src/cpu/pred/gselect.cc	2023-03-26 22:56:20.416643296 +0000
-@@ -0,0 +1,102 @@
++++ gem5/src/cpu/pred/gselect.cc	2023-03-27 01:27:27.527246444 +0000
+@@ -0,0 +1,112 @@
 +#include "cpu/pred/gselect.hh"
 +
 +#include "base/bitfield.hh"
 +#include "base/intmath.hh"
-+
++// Constructor for the GSelectBP class
++// Initializes the branch predictor with the specified parameters
 +GSelectBP::GSelectBP(const GSelectBPParams &params)
 +    : BPredUnit(params),
 +      globalHistoryReg(params.numThreads, 0),
@@ -42,34 +43,40 @@ diff -ruN gem5_clean/src/cpu/pred/gselect.cc gem5/src/cpu/pred/gselect.cc
 +      globalCtrBits(params.PHTCtrBits),
 +      counters(globalPredictorSize, SatCounter8(globalCtrBits))
 +{
++    // Ensure that the global predictor size is a power of 2
 +    if (!isPowerOf2(globalPredictorSize))
 +        fatal("Invalid global history predictor size.\n");
-+
++    // Initialize masks and threshold for the branch predictor
 +    historyRegisterMask = mask(globalHistoryBits);
 +    globalHistoryMask = globalPredictorSize - 1;
 +
 +    threshold = (ULL(1) << (globalCtrBits - 1)) - 1;
 +}
-+
++// Updates the global history register with "taken" and sets the final prediction to true
 +void
 +GSelectBP::uncondBranch(ThreadID tid, Addr pc, void * &bpHistory)
 +{
++    // Create a new BPHistory object and set its fields
 +    BPHistory *history = new BPHistory;
 +    history->globalHistoryReg = globalHistoryReg[tid];
 +    history->finalPred = true;
 +    bpHistory = static_cast<void*>(history);
++
++    // Update the global history register with "taken"
 +    updateGlobalHistReg(tid, true);
 +}
-+
++// Squashes all outstanding updates until a given sequence number
++// Restores the global history register to its previous state and deletes the history object
 +void
 +GSelectBP::squash(ThreadID tid, void *bpHistory)
 +{
 +    BPHistory *history = static_cast<BPHistory*>(bpHistory);
 +    globalHistoryReg[tid] = history->globalHistoryReg;
-+
 +    delete history;
 +}
 +
++// Looks up the appropriate counter in the pattern history table (PHT) and makes a prediction
++// Updates the global history register based on the prediction
 +bool
 +GSelectBP::lookup(ThreadID tid, Addr branchAddr, void * &bpHistory)
 +{
@@ -90,12 +97,14 @@ diff -ruN gem5_clean/src/cpu/pred/gselect.cc gem5/src/cpu/pred/gselect.cc
 +    return finalPrediction;
 +}
 +
++// Updates the global history register to ensure a "not taken" prediction when there is a BTB miss
 +void
 +GSelectBP::btbUpdate(ThreadID tid, Addr branchAddr, void * &bpHistory)
 +{
 +    globalHistoryReg[tid] &= (historyRegisterMask & ~ULL(1));
 +}
 +
++// Updates the branch predictor based on the actual outcome of the branch
 +void
 +GSelectBP::update(ThreadID tid, Addr branchAddr, bool taken, void *bpHistory,
 +                 bool squashed, const StaticInstPtr & inst, Addr corrTarget)
@@ -124,6 +133,7 @@ diff -ruN gem5_clean/src/cpu/pred/gselect.cc gem5/src/cpu/pred/gselect.cc
 +    delete history;
 +}
 +
++// Updates the global history register based on the outcome of a branch
 +void
 +GSelectBP::updateGlobalHistReg(ThreadID tid, bool taken)
 +{
@@ -134,15 +144,16 @@ diff -ruN gem5_clean/src/cpu/pred/gselect.cc gem5/src/cpu/pred/gselect.cc
 \ No newline at end of file
 diff -ruN gem5_clean/src/cpu/pred/gselect.hh gem5/src/cpu/pred/gselect.hh
 --- gem5_clean/src/cpu/pred/gselect.hh	1970-01-01 00:00:00.000000000 +0000
-+++ gem5/src/cpu/pred/gselect.hh	2023-03-26 22:08:31.985830866 +0000
-@@ -0,0 +1,42 @@
++++ gem5/src/cpu/pred/gselect.hh	2023-03-27 01:27:20.938587688 +0000
+@@ -0,0 +1,43 @@
 +#ifndef __CPU_PRED_GSELECT_PRED_HH__
 +#define __CPU_PRED_GSELECT_PRED_HH__
 +
 +#include "base/sat_counter.hh"
 +#include "cpu/pred/bpred_unit.hh"
 +#include "params/GSelectBP.hh"
-+
++// The GSelectBP class implements a gselect branch predictor.
++// The gselect predictor uses a global history register and a pattern history table (PHT)
 +class GSelectBP : public BPredUnit
 +{
 +  public:

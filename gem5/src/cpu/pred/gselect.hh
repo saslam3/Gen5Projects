@@ -4,7 +4,8 @@
 #include "base/sat_counter.hh"
 #include "cpu/pred/bpred_unit.hh"
 #include "params/GSelectBP.hh"
-
+// The GSelectBP class implements a gselect branch predictor.
+// The gselect predictor uses a global history register and a pattern history table (PHT)
 class GSelectBP : public BPredUnit
 {
   public:
